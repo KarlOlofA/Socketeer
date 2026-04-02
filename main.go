@@ -66,14 +66,14 @@ func handleConnection(conn net.Conn) {
 		buffer := make([]byte, 1024)
 		n, err := conn.Read(buffer)
 		if err != nil {
-			log.Fatal(err)
+			fmt.Printf("Failed to connect %s\n", conn.RemoteAddr())
+			return
 		}
 		var d Data
 		if err := json.Unmarshal(buffer[:n], &d); err != nil {
 
 			responseStr := "Failed to parse message to json."
 			_, err = conn.Write([]byte(responseStr))
-			log.Fatal(err)
 			return
 		}
 		address := conn.RemoteAddr().String()
@@ -98,6 +98,8 @@ func handleConnection(conn net.Conn) {
 			connection.user.IsAuthed = true
 		}
 
+		distributeMessage(connection, d)
+
 		fmt.Printf("%v : Conn -> \nMsg: %s\nBrush size: %v\nBrush color: %v\n", conn.RemoteAddr(), d.Msg, d.Brush.Size, d.Brush.Color)
 		time := time.Now().Format(time.ANSIC)
 		responseStr := fmt.Sprintf("Valid client message recieved at %v", time)
@@ -105,8 +107,20 @@ func handleConnection(conn net.Conn) {
 	}
 }
 
-func establishConnection(conn net.Conn) {
+func distributeMessage(distConn Connection, data Data) {
+	for _, conn := range connections {
+		if conn.user.IpAddress == distConn.user.IpAddress {
+			continue
+		}
 
+		json, err := json.Marshal(data)
+
+		if err != nil {
+			continue
+		}
+
+		conn.connection.Write(json)
+	}
 }
 
 func closeConnection(conn net.Conn) {
