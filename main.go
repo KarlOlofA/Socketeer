@@ -26,16 +26,20 @@ var connections map[string]Connection
 
 func main() {
 	godotenv.Load()
+
 	connections = make(map[string]Connection)
-	ln, err := net.Listen(METHOD, fmt.Sprintf("%s:%s", HOST, PORT))
+
+	listener, err := net.Listen(METHOD, fmt.Sprintf("%s:%s", HOST, PORT))
 	if err != nil {
 		log.Fatal(err)
 		return
 	}
-	defer ln.Close()
+	defer listener.Close()
+
 	fmt.Printf("Listening to port %s.\n", PORT)
+
 	for {
-		conn, err := ln.Accept()
+		conn, err := listener.Accept()
 		if err != nil {
 			fmt.Print("TCP accept failed.\n")
 			return
@@ -44,39 +48,27 @@ func main() {
 	}
 }
 
-type Data struct {
-	Msg    string    `json:"msg"`
-	ApiKey string    `json:"apiKey"`
-	Brush  BrushData `json:"brushdata"`
-}
-
-type BrushData struct {
-	Size  float32 `json:"size"`
-	Color struct {
-		R float32 `json:"r"`
-		G float32 `json:"g"`
-		B float32 `json:"b"`
-		A float32 `json:"a"`
-	} `json:"color"`
+type Packet struct {
+	Data []byte `json:"data"`
+	Key  string `json:"key"`
 }
 
 func handleConnection(conn net.Conn) {
-	defer conn.Close()
 	for {
 		buffer := make([]byte, 1024)
 		n, err := conn.Read(buffer)
 		if err != nil {
-			fmt.Printf("Failed to connect %s\n", conn.RemoteAddr())
-			return
+			closeConnection(conn, fmt.Sprintf("Failed to connect %s\n", conn.RemoteAddr()))
+			break
 		}
-		var d Data
-		if err := json.Unmarshal(buffer[:n], &d); err != nil {
 
-			responseStr := "Failed to parse message to json."
-			_, err = conn.Write([]byte(responseStr))
+		var packet Packet
+		if err := json.Unmarshal(buffer[:n], &packet); err != nil {
+			closeConnection(conn, "Failed to parse message to json.")
 			return
 		}
 		address := conn.RemoteAddr().String()
+		fmt.Printf("Distributing ip address %s\n", address)
 		connection, ok := connections[address]
 		if !ok {
 			fmt.Printf("Create user at %s\n", address)
@@ -87,46 +79,45 @@ func handleConnection(conn net.Conn) {
 				},
 				connection: conn,
 			}
+			connection = connections[address]
 		}
 
 		if !connection.user.IsAuthed {
-			_, err := connection.user.ValidateApiKey(d.ApiKey)
+			_, err := connection.user.ValidateApiKey(packet.Key)
 			if err != nil {
-				fmt.Printf("Failed to authenticate user at %s\n", address)
+				closeConnection(conn, fmt.Sprintf("Failed to authenticate user at %s\n", address))
 				return
 			}
 			connection.user.IsAuthed = true
 		}
 
-		distributeMessage(connection, d)
-
-		fmt.Printf("%v : Conn -> \nMsg: %s\nBrush size: %v\nBrush color: %v\n", conn.RemoteAddr(), d.Msg, d.Brush.Size, d.Brush.Color)
 		time := time.Now().Format(time.ANSIC)
 		responseStr := fmt.Sprintf("Valid client message recieved at %v", time)
 		_, err = conn.Write([]byte(responseStr))
+
+		go distributeMessage(&connection, packet)
 	}
 }
 
-func distributeMessage(distConn Connection, data Data) {
+func distributeMessage(distConn *Connection, packet Packet) {
 	for _, conn := range connections {
+		fmt.Printf("Packet -> %v\n", string(packet.Data))
 		if conn.user.IpAddress == distConn.user.IpAddress {
 			continue
 		}
 
-		json, err := json.Marshal(data)
-
-		if err != nil {
-			continue
-		}
-
-		conn.connection.Write(json)
+		conn.connection.Write(packet.Data)
 	}
 }
 
-func closeConnection(conn net.Conn) {
+func closeConnection(conn net.Conn, msg string) {
 	if conn == nil {
 		return
 	}
+
+	fmt.Printf("Closed connection -> %s\n", msg)
+
+	go conn.Write([]byte(msg))
 
 	conn.Close()
 }
