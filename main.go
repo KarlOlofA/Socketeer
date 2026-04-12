@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"time"
+	"strings"
 
 	"github.com/joho/godotenv"
 	auth "socketeer.github.com/internal/auth"
@@ -49,53 +49,74 @@ func main() {
 }
 
 type Packet struct {
-	Data []byte `json:"data"`
-	Key  string `json:"key"`
+	Data       []byte `json:"data"`
+	PacketType int    `json:"packetType"`
+	Key        string `json:"key"`
 }
+
+const (
+	Data    int = 0
+	Welcome int = 1
+)
 
 func handleConnection(conn net.Conn) {
 	for {
 		buffer := make([]byte, 1024)
-		n, err := conn.Read(buffer)
+		_, err := conn.Read(buffer)
 		if err != nil {
 			closeConnection(conn, fmt.Sprintf("Failed to connect %s\n", conn.RemoteAddr()))
 			break
 		}
 
-		var packet Packet
-		if err := json.Unmarshal(buffer[:n], &packet); err != nil {
-			closeConnection(conn, "Failed to parse message to json.")
-			return
-		}
-		address := conn.RemoteAddr().String()
-		fmt.Printf("Distributing ip address %s\n", address)
-		connection, ok := connections[address]
-		if !ok {
-			fmt.Printf("Create user at %s\n", address)
-			connections[address] = Connection{
-				user: auth.User{
-					IpAddress: address,
-					IsAuthed:  false,
-				},
-				connection: conn,
-			}
-			connection = connections[address]
-		}
+		splits := strings.Split(string(buffer), "}{")
 
-		if !connection.user.IsAuthed {
-			_, err := connection.user.ValidateApiKey(packet.Key)
-			if err != nil {
-				closeConnection(conn, fmt.Sprintf("Failed to authenticate user at %s\n", address))
+		var packets []Packet = make([]Packet, len(splits))
+
+		for i, d := range splits {
+			fmt.Println(d)
+			var packet Packet
+			if err := json.Unmarshal([]byte(d), &packet); err != nil {
+
+				closeConnection(conn, fmt.Sprintf("Failed to parse message to json. -> %v\n", err))
 				return
 			}
-			connection.user.IsAuthed = true
+
+			packets[i] = packet
 		}
 
-		time := time.Now().Format(time.ANSIC)
-		responseStr := fmt.Sprintf("Valid client message recieved at %v", time)
-		_, err = conn.Write([]byte(responseStr))
+		for _, packet := range packets {
+			if packet.PacketType == Welcome {
+				go distributeWelcome(conn)
+				continue
+			}
 
-		go distributeMessage(&connection, packet)
+			address := conn.RemoteAddr().String()
+			fmt.Printf("Distributing ip address %s\n", address)
+			connection, ok := connections[address]
+			if !ok {
+				fmt.Printf("Create user at %s\n", address)
+				connections[address] = Connection{
+					user: auth.User{
+						IpAddress: address,
+						IsAuthed:  false,
+					},
+					connection: conn,
+				}
+				connection = connections[address]
+			}
+
+			if !connection.user.IsAuthed {
+				_, err := connection.user.ValidateApiKey(packet.Key)
+				if err != nil {
+					closeConnection(conn, fmt.Sprintf("Failed to authenticate user at %s\n", address))
+					return
+				}
+				connection.user.IsAuthed = true
+			}
+
+			go distributeMessage(&connection, packet)
+		}
+
 	}
 }
 
@@ -107,6 +128,21 @@ func distributeMessage(distConn *Connection, packet Packet) {
 		}
 
 		conn.connection.Write(packet.Data)
+	}
+}
+
+func distributeWelcome(distConn net.Conn) {
+	if _, ok := connections[distConn.RemoteAddr().String()]; !ok {
+		connections[distConn.RemoteAddr().String()] = Connection{
+			connection: distConn,
+		}
+	}
+	for _, conn := range connections {
+		if conn.user.IpAddress == distConn.RemoteAddr().String() {
+			conn.connection.Write([]byte(fmt.Sprintf("You (%s) connected to the server\n", distConn.RemoteAddr().String())))
+			continue
+		}
+		conn.connection.Write([]byte(fmt.Sprintf("%s connected to the session\n", distConn.RemoteAddr().String())))
 	}
 }
 
