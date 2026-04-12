@@ -1,14 +1,13 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"net"
-	"strings"
 
 	"github.com/joho/godotenv"
 	auth "socketeer.github.com/internal/auth"
+	types "socketeer.github.com/internal/types"
 )
 
 const (
@@ -48,44 +47,26 @@ func main() {
 	}
 }
 
-type Packet struct {
-	Data       []byte `json:"data"`
-	PacketType int    `json:"packetType"`
-	Key        string `json:"key"`
-}
-
-const (
-	Data    int = 0
-	Welcome int = 1
-)
-
 func handleConnection(conn net.Conn) {
 	for {
 		buffer := make([]byte, 1024)
-		_, err := conn.Read(buffer)
+		n, err := conn.Read(buffer)
 		if err != nil {
 			closeConnection(conn, fmt.Sprintf("Failed to connect %s\n", conn.RemoteAddr()))
 			break
 		}
 
-		splits := strings.Split(string(buffer), "}{")
+		var packets []types.Packet
 
-		var packets []Packet = make([]Packet, len(splits))
+		var packet types.Packet
+		packet.BuildFromByteSlice(buffer[:n])
 
-		for i, d := range splits {
-			fmt.Println(d)
-			var packet Packet
-			if err := json.Unmarshal([]byte(d), &packet); err != nil {
+		fmt.Printf("Key -> %s\n PacketType -> %d\n Data -> %s\n", packet.Key, packet.PacketType, string(packet.Data))
 
-				closeConnection(conn, fmt.Sprintf("Failed to parse message to json. -> %v\n", err))
-				return
-			}
-
-			packets[i] = packet
-		}
+		packets = append(packets, packet)
 
 		for _, packet := range packets {
-			if packet.PacketType == Welcome {
+			if packet.PacketType == types.Welcome {
 				go distributeWelcome(conn)
 				continue
 			}
@@ -120,7 +101,7 @@ func handleConnection(conn net.Conn) {
 	}
 }
 
-func distributeMessage(distConn *Connection, packet Packet) {
+func distributeMessage(distConn *Connection, packet types.Packet) {
 	for _, conn := range connections {
 		fmt.Printf("Packet -> %v\n", string(packet.Data))
 		if conn.user.IpAddress == distConn.user.IpAddress {
