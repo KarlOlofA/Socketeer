@@ -2,34 +2,29 @@ package types
 
 import (
 	"bytes"
-	"encoding/gob"
+	"encoding/binary"
+	"encoding/hex"
+	"errors"
 	"fmt"
+
+	"golang.org/x/text/encoding/unicode"
 )
 
 type Packet struct {
-	KeySize    uint16
+	PacketType uint16 `json:"packetType"`
 	Key        string `json:"key"`
-	PacketType int    `json:"packetType"`
 	Data       []byte `json:"data"`
 }
 
 const (
-	Data    int = 0
-	Welcome int = 1
+	Data    uint16 = 0
+	Welcome uint16 = 1
 )
-
-type TestPacket struct {
-	KeySize    uint16
-	Key        string
-	PacketType int
-	Data       []byte
-}
 
 func (p Packet) ToByteSlice() ([]byte, error) {
 
 	var buffer bytes.Buffer
-	encoder := gob.NewEncoder(&buffer)
-	err := encoder.Encode(p)
+	err := binary.Write(&buffer, binary.BigEndian, p)
 	if err != nil {
 		return nil, fmt.Errorf("Packet parse failed -> %v\n", err)
 	}
@@ -39,11 +34,38 @@ func (p Packet) ToByteSlice() ([]byte, error) {
 }
 
 func (p *Packet) BuildFromByteSlice(packetByteSlice []byte) error {
-	buffer := bytes.NewBuffer(packetByteSlice)
-	decoder := gob.NewDecoder(buffer)
-	err := decoder.Decode(&p)
+	reader := bytes.NewReader(packetByteSlice)
+
+	fmt.Println("Go Input (hex):")
+	fmt.Println(hex.EncodeToString(packetByteSlice))
+
+	err := binary.Read(reader, binary.BigEndian, &p.PacketType)
 	if err != nil {
 		return err
 	}
+
+	var keySize uint16
+	err = binary.Read(reader, binary.BigEndian, &keySize)
+	if err != nil {
+		return err
+	}
+
+	keyBytes := make([]byte, keySize)
+	_, err = reader.Read(keyBytes)
+	if err != nil {
+		return err
+	}
+
+	decoder := unicode.UTF16(unicode.BigEndian, unicode.UseBOM).NewDecoder()
+	decodedKey, err := decoder.Bytes(keyBytes)
+	if err != nil {
+		return errors.New("Failed to decode key")
+	}
+	p.Key = string(decodedKey)
+
+	remaining := reader.Len()
+	p.Data = make([]byte, remaining)
+	_, err = reader.Read(p.Data)
+
 	return nil
 }

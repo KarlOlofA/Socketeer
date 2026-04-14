@@ -57,12 +57,8 @@ func handleConnection(conn net.Conn) {
 		}
 
 		var packets []types.Packet
-
 		var packet types.Packet
 		packet.BuildFromByteSlice(buffer[:n])
-
-		fmt.Printf("Key -> %s\n PacketType -> %d\n Data -> %s\n", packet.Key, packet.PacketType, string(packet.Data))
-
 		packets = append(packets, packet)
 
 		for _, packet := range packets {
@@ -72,7 +68,6 @@ func handleConnection(conn net.Conn) {
 			}
 
 			address := conn.RemoteAddr().String()
-			fmt.Printf("Distributing ip address %s\n", address)
 			connection, ok := connections[address]
 			if !ok {
 				fmt.Printf("Create user at %s\n", address)
