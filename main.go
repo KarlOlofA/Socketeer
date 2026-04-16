@@ -62,10 +62,6 @@ func handleConnection(conn net.Conn) {
 		packets = append(packets, packet)
 
 		for _, packet := range packets {
-			if packet.PacketType == types.Welcome {
-				go distributeWelcome(conn)
-				continue
-			}
 
 			address := conn.RemoteAddr().String()
 			connection, ok := connections[address]
@@ -90,15 +86,18 @@ func handleConnection(conn net.Conn) {
 				connection.user.IsAuthed = true
 			}
 
-			go distributeMessage(&connection, packet)
+			if packet.PacketType == types.Welcome {
+				go distributeWelcome(conn)
+				continue
+			}
+			go distributePacket(&connection, packet)
 		}
 
 	}
 }
 
-func distributeMessage(distConn *Connection, packet types.Packet) {
+func distributePacket(distConn *Connection, packet types.Packet) {
 	for _, conn := range connections {
-		fmt.Printf("Packet -> %v\n", string(packet.Data))
 		if conn.user.IpAddress == distConn.user.IpAddress {
 			continue
 		}
@@ -108,17 +107,22 @@ func distributeMessage(distConn *Connection, packet types.Packet) {
 }
 
 func distributeWelcome(distConn net.Conn) {
-	if _, ok := connections[distConn.RemoteAddr().String()]; !ok {
+	if len(connections) <= 0 {
+		connections[distConn.RemoteAddr().String()] = Connection{
+			connection: distConn,
+		}
+	} else if _, ok := connections[distConn.RemoteAddr().String()]; !ok {
 		connections[distConn.RemoteAddr().String()] = Connection{
 			connection: distConn,
 		}
 	}
+
 	for _, conn := range connections {
 		if conn.user.IpAddress == distConn.RemoteAddr().String() {
-			conn.connection.Write([]byte(fmt.Sprintf("You (%s) connected to the server\n", distConn.RemoteAddr().String())))
+			conn.connection.Write(fmt.Appendf(nil, "You (%s) connected to the server\n", distConn.RemoteAddr().String()))
 			continue
 		}
-		conn.connection.Write([]byte(fmt.Sprintf("%s connected to the session\n", distConn.RemoteAddr().String())))
+		conn.connection.Write(fmt.Appendf(nil, "%s connected to the session\n", distConn.RemoteAddr().String()))
 	}
 }
 
