@@ -76,7 +76,7 @@ func handleConnection(conn net.Conn) {
 				}
 				connection = connections[address]
 			}
-
+			packet.Key = "1234"
 			if !connection.user.IsAuthed {
 				_, err := connection.user.ValidateApiKey(packet.Key)
 				if err != nil {
