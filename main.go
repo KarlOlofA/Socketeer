@@ -102,12 +102,12 @@ func handleConnection(conn net.Conn) {
 }
 
 func distributePacketConn(distConn net.Conn, packet []byte) {
-	for _, conn := range connections {
-		if conn.user.IpAddress == distConn.RemoteAddr().String() {
+	for _, conn := range conns {
+		if conn.RemoteAddr().String() == distConn.RemoteAddr().String() {
 			continue
 		}
 
-		conn.connection.Write(packet)
+		conn.Write(packet)
 	}
 }
 func distributePacket(distConn *Connection, packet types.Packet) {
