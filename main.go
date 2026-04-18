@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	HOST   = "localhost"
+	HOST   = "194.47.156.73"
 	PORT   = "8080"
 	METHOD = "tcp"
 )
@@ -75,6 +75,7 @@ func handleConnection(conn net.Conn) {
 					connection: conn,
 				}
 				connection = connections[address]
+				go distributeWelcome(conn)
 			}
 
 			if !connection.user.IsAuthed {
@@ -86,10 +87,6 @@ func handleConnection(conn net.Conn) {
 				connection.user.IsAuthed = true
 			}
 
-			if packet.PacketType == types.Welcome {
-				go distributeWelcome(conn)
-				continue
-			}
 			go distributePacket(&connection, packet)
 		}
 
