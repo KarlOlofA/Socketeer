@@ -66,7 +66,7 @@ func handleConnection(conn net.Conn) {
 		if _, ok := conns[address]; !ok {
 			conns[address] = conn
 		}
-		distributePacketConn(&conn, buffer[:n])
+		distributePacketConn(conn, buffer[:n])
 
 		continue
 		/*
