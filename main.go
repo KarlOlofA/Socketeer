@@ -22,6 +22,7 @@ type Connection struct {
 }
 
 var connections map[string]Connection
+var conns map[string]net.Conn
 
 func main() {
 	godotenv.Load()
@@ -55,46 +56,60 @@ func handleConnection(conn net.Conn) {
 			closeConnection(conn, fmt.Sprintf("Failed to connect %s\n", conn.RemoteAddr()))
 			break
 		}
-
-		var packets []types.Packet
-		var packet types.Packet
-		packet.BuildFromByteSlice(buffer[:n])
-		packets = append(packets, packet)
-
-		for _, packet := range packets {
-
-			address := conn.RemoteAddr().String()
-			connection, ok := connections[address]
-			if !ok {
-				fmt.Printf("Create user at %s\n", address)
-				connections[address] = Connection{
-					user: auth.User{
-						IpAddress: address,
-						IsAuthed:  false,
-					},
-					connection: conn,
-				}
-				connection = connections[address]
-			}
-			packet.Key = "1234"
-			if !connection.user.IsAuthed {
-				_, err := connection.user.ValidateApiKey(packet.Key)
-				if err != nil {
-					closeConnection(conn, fmt.Sprintf("Failed to authenticate user at %s\n", address))
-					return
-				}
-				connection.user.IsAuthed = true
-			}
-			if _, ok := connections[connection.connection.RemoteAddr().String()]; !ok {
-				go distributeWelcome(conn)
-				continue
-			}
-			go distributePacket(&connection, packet)
+		/*
+			var packets []types.Packet
+			var packet types.Packet
+			packet.BuildFromByteSlice(buffer[:n])
+			packets = append(packets, packet)
+		*/
+		address := conn.RemoteAddr().String()
+		if _, ok := conns[address]; !ok {
+			conns[address] = conn
 		}
+		distributePacketConn(&conn, buffer[:n])
 
+		continue
+		/*
+			for _, packet := range packets {
+
+							if !ok {
+								fmt.Printf("Create user at %s\n", address)
+								connections[address] = Connection{
+									user: auth.User{
+										IpAddress: address,
+										IsAuthed:  false,
+									},
+									connection: conn,
+								}
+								connection = connections[address]
+							}
+							packet.Key = "1234"
+							if !connection.user.IsAuthed {
+								_, err := connection.user.ValidateApiKey(packet.Key)
+								if err != nil {
+									closeConnection(conn, fmt.Sprintf("Failed to authenticate user at %s\n", address))
+									return
+								}
+								connection.user.IsAuthed = true
+							}
+							if _, ok := connections[connection.connection.RemoteAddr().String()]; !ok {
+								go distributeWelcome(conn)
+								continue
+							}*/
+		//go distributePacket(&connection, packet)
 	}
+
 }
 
+func distributePacketConn(distConn net.Conn, packet []byte) {
+	for _, conn := range connections {
+		if conn.user.IpAddress == distConn.RemoteAddr().String() {
+			continue
+		}
+
+		conn.connection.Write(packet)
+	}
+}
 func distributePacket(distConn *Connection, packet types.Packet) {
 	for _, conn := range connections {
 		if conn.user.IpAddress == distConn.user.IpAddress {
