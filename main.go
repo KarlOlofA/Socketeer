@@ -75,7 +75,6 @@ func handleConnection(conn net.Conn) {
 					connection: conn,
 				}
 				connection = connections[address]
-				go distributeWelcome(conn)
 			}
 
 			if !connection.user.IsAuthed {
@@ -86,7 +85,10 @@ func handleConnection(conn net.Conn) {
 				}
 				connection.user.IsAuthed = true
 			}
+			if _, ok := connections[connection.connection.RemoteAddr().String()]; !ok {
 
+				go distributeWelcome(conn)
+			}
 			go distributePacket(&connection, packet)
 		}
 
