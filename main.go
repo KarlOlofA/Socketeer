@@ -27,7 +27,7 @@ var conns map[string]net.Conn
 func main() {
 	godotenv.Load()
 
-	connections = make(map[string]Connection)
+	conns = make(map[string]net.Conn)
 
 	listener, err := net.Listen(METHOD, fmt.Sprintf("%s:%s", HOST, PORT))
 	if err != nil {
