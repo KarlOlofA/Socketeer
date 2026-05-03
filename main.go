@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	HOST   = "194.47.156.73"
+	HOST   = "localhost"
 	PORT   = "8080"
 	METHOD = "tcp"
 )
