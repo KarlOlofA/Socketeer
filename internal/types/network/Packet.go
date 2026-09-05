@@ -1,4 +1,4 @@
-package types
+package network
 
 import (
 	"bytes"
@@ -11,9 +11,10 @@ import (
 )
 
 type Packet struct {
-	PacketType uint16 `json:"packetType"`
-	Key        string `json:"key"`
-	Data       []byte `json:"data"`
+	KeySize    uint16
+	PacketType uint16
+	Key        string
+	Data       []byte
 }
 
 const (

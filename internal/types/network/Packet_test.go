@@ -1,4 +1,4 @@
-package types
+package network
 
 import (
 	"encoding/binary"
@@ -7,11 +7,7 @@ import (
 )
 
 func TestPacketToByteSlice(t *testing.T) {
-
-	size := []byte("1234")
-	keySize := binary.LittleEndian.Uint16(size)
 	packet := Packet{
-		KeySize:    keySize,
 		Key:        "1234",
 		PacketType: 1,
 		Data:       []byte("Test"),
@@ -29,7 +25,7 @@ func TestPacketToByteSlice(t *testing.T) {
 
 func TestByteSliceToPacket(t *testing.T) {
 	size := []byte("1234")
-	keySize := binary.LittleEndian.Uint16(size)
+	keySize := binary.BigEndian.Uint16(size)
 
 	packet := Packet{
 		KeySize:    keySize,
