@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net"
 	"sync"
+
+	"socketeer.github.com/internal/types/network"
 )
 
 type ConnectionManager struct {
@@ -12,7 +14,7 @@ type ConnectionManager struct {
 	mu            sync.Mutex
 	addChannel    chan net.Conn
 	removeChannel chan net.Conn
-	MiddleWare    []func(net.Conn) error
+	MiddleWare    []func(net.Conn) (net.Conn, error)
 }
 
 func NewConnectionManager(size int) *ConnectionManager {
@@ -58,34 +60,75 @@ func (c *ConnectionManager) ProcessConnections() {
 		conn, err := c.TCPListener.Accept()
 		if err != nil {
 			fmt.Print("TCP accept failed.\n")
-			return
+			continue
 		}
 
-		go c.AddChannel(conn)
-
-		buffer := make([]byte, 1024)
-		_, err = conn.Read(buffer)
-		if err != nil {
-			go c.RemoveChannel(conn)
-			break
+		if _, ok := c.Connections[conn]; !ok {
+			go c.AddChannel(conn)
 		}
 
-		c.distributePacketConn(conn, buffer)
+		go func() {
+			defer conn.Close()
+			for {
+
+				conn, err := c.ProcessMiddleware(conn)
+				if err != nil {
+					go c.denyPacketConn(conn, fmt.Sprintf("Middleware Error: %v", err))
+					break
+				} else if conn == nil {
+					go c.denyPacketConn(conn, "Middleware failed to return a connection")
+					break
+				}
+
+				c.distributePacketConn(conn)
+			}
+		}()
 
 	}
 }
 
-func (p *ConnectionManager) AddMiddleware(mw func(net.Conn) error) *ConnectionManager {
+func (p *ConnectionManager) AddMiddleware(mw func(net.Conn) (net.Conn, error)) *ConnectionManager {
 	p.MiddleWare = append(p.MiddleWare, mw)
 	return p
 }
 
-func (c *ConnectionManager) distributePacketConn(distConn net.Conn, packet []byte) {
+func (c *ConnectionManager) ProcessMiddleware(conn net.Conn) (net.Conn, error) {
+
+	for _, mwf := range c.MiddleWare {
+		_, err := mwf(conn)
+		if err != nil {
+			//conn.Write([]byte(fmt.Sprintf("%v", err)))
+			return nil, err
+		}
+	}
+
+	return conn, nil
+}
+
+func (c *ConnectionManager) denyPacketConn(conn net.Conn, reasoning string) {
+	packet := []byte(reasoning)
+	go c.RemoveChannel(conn)
+	conn.Write(packet)
+}
+
+func (c *ConnectionManager) distributePacketConn(distConn net.Conn) {
+	buffer := make([]byte, 1024)
+	if _, err := distConn.Read(buffer); err != nil {
+		return
+	}
+
+	p := network.Packet{}
+	p.FromByteSlice(buffer)
+	fmt.Printf("%v\n", p.Key)
+	fmt.Printf("%v\n", p.Length)
+	fmt.Printf("%v\n", p.User)
+	fmt.Printf("%v\n", string(p.Data))
+
 	for conn := range c.Connections {
 		if conn.RemoteAddr().String() == distConn.RemoteAddr().String() {
 			continue
 		}
 
-		conn.Write(packet)
+		conn.Write(buffer[:24+p.Length])
 	}
 }

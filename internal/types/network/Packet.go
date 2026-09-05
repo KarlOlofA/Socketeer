@@ -11,10 +11,10 @@ import (
 )
 
 type Packet struct {
-	KeySize    uint16
-	PacketType uint16
-	Key        string
-	Data       []byte
+	Key    string
+	Length uint32
+	User   string
+	Data   []byte
 }
 
 const (
@@ -40,25 +40,30 @@ func (p *Packet) BuildFromByteSlice(packetByteSlice []byte) error {
 	fmt.Println("Go Input (hex):")
 	fmt.Println(hex.EncodeToString(packetByteSlice))
 
-	err := binary.Read(reader, binary.BigEndian, &p.PacketType)
+	err := binary.Read(reader, binary.BigEndian, &p.Key)
 	if err != nil {
 		return err
 	}
 
-	var keySize uint16
-	err = binary.Read(reader, binary.BigEndian, &keySize)
+	var length uint32
+	err = binary.Read(reader, binary.BigEndian, &length)
 	if err != nil {
 		return err
 	}
 
-	keyBytes := make([]byte, keySize)
-	_, err = reader.Read(keyBytes)
+	err = binary.Read(reader, binary.BigEndian, &p.User)
+	if err != nil {
+		return err
+	}
+
+	data := make([]byte, length)
+	_, err = reader.Read(data)
 	if err != nil {
 		return err
 	}
 
 	decoder := unicode.UTF16(unicode.BigEndian, unicode.UseBOM).NewDecoder()
-	decodedKey, err := decoder.Bytes(keyBytes)
+	decodedKey, err := decoder.Bytes(data)
 	if err != nil {
 		return errors.New("Failed to decode key")
 	}
@@ -68,5 +73,30 @@ func (p *Packet) BuildFromByteSlice(packetByteSlice []byte) error {
 	p.Data = make([]byte, remaining)
 	_, err = reader.Read(p.Data)
 
+	return nil
+}
+
+func (p *Packet) FromByteSlice(slice []byte) error {
+
+	if len(slice) < 25 {
+		return fmt.Errorf("Byte slice to small")
+	}
+
+	p.Key = string(slice[:4])
+	length := slice[4:8]
+	var num uint32
+	err := binary.Read(bytes.NewReader(length), binary.BigEndian, &num)
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
+
+	if num > 1000 {
+		return fmt.Errorf("Message length to large: %d", num)
+	}
+
+	p.Length = num
+	p.User = string(slice[8:24])
+	p.Data = slice[24 : 24+num]
 	return nil
 }

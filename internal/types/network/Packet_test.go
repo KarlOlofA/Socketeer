@@ -6,11 +6,17 @@ import (
 	"testing"
 )
 
+const (
+	Key    = 4
+	Length = 4
+	User   = 16
+)
+
 func TestPacketToByteSlice(t *testing.T) {
 	packet := Packet{
-		Key:        "1234",
-		PacketType: 1,
-		Data:       []byte("Test"),
+		Key:    "1234",
+		Length: 1,
+		Data:   []byte("Test"),
 	}
 
 	slice, err := packet.ToByteSlice()
@@ -24,14 +30,14 @@ func TestPacketToByteSlice(t *testing.T) {
 }
 
 func TestByteSliceToPacket(t *testing.T) {
-	size := []byte("1234")
-	keySize := binary.BigEndian.Uint16(size)
+	size := []byte("Test")
+	keySize := binary.BigEndian.Uint32(size)
 
 	packet := Packet{
-		KeySize:    keySize,
-		Key:        "1234",
-		PacketType: 1,
-		Data:       []byte("Test"),
+		Key:    "1234",
+		Length: keySize,
+		User:   "",
+		Data:   []byte("Test"),
 	}
 
 	slice, err := packet.ToByteSlice()
@@ -45,5 +51,5 @@ func TestByteSliceToPacket(t *testing.T) {
 		t.Errorf("Failed to build from byte slice -> %v\n", err)
 	}
 	packet = newPacket
-	fmt.Printf("Key -> %s\n PacketType -> %d\n Data -> %s\n", packet.Key, packet.PacketType, string(packet.Data))
+	fmt.Printf("Key -> %s\n length -> %d\nuser -> %s\n Data -> %s\n", packet.Key, packet.Length, packet.User, string(packet.Data))
 }
