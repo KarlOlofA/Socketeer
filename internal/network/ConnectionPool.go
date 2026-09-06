@@ -8,7 +8,7 @@ import (
 	"socketeer.github.com/internal/types/network"
 )
 
-type ConnectionManager struct {
+type TcpServer struct {
 	TCPListener   net.Listener
 	Connections   map[net.Conn]struct{}
 	mu            sync.Mutex
@@ -17,87 +17,106 @@ type ConnectionManager struct {
 	MiddleWare    []func(net.Conn) (net.Conn, error)
 }
 
-func NewConnectionManager(size int) *ConnectionManager {
-	return &ConnectionManager{
-		Connections:   make(map[net.Conn]struct{}, size),
-		addChannel:    make(chan net.Conn, size),
-		removeChannel: make(chan net.Conn, size),
+type TcpServerSettings struct {
+	Host               string
+	Port               string
+	Method             string
+	Key                string
+	ConnectionPoolSize uint
+}
+
+func NewTcpServer(settings TcpServerSettings) *TcpServer {
+
+	listener, err := net.Listen(settings.Method, fmt.Sprintf("%s:%s", settings.Host, settings.Port))
+
+	if err != nil {
+		return nil
 	}
+	defer listener.Close()
+
+	ts := TcpServer{
+		Connections:   make(map[net.Conn]struct{}, settings.ConnectionPoolSize),
+		addChannel:    make(chan net.Conn, settings.ConnectionPoolSize),
+		removeChannel: make(chan net.Conn, settings.ConnectionPoolSize),
+	}
+	ts.TCPListener = listener
+
+	return &ts
 
 }
 
-func (c *ConnectionManager) AssignTCPListener(listener net.Listener) {
-	c.TCPListener = listener
+func (ts *TcpServer) AssignTCPListener(listener net.Listener) {
+	ts.TCPListener = listener
 }
 
-func (c *ConnectionManager) AddChannel(conn net.Conn) {
-	c.addChannel <- conn
+func (ts *TcpServer) AddChannel(conn net.Conn) {
+	ts.addChannel <- conn
 }
-func (c *ConnectionManager) RemoveChannel(conn net.Conn) {
-	c.removeChannel <- conn
+func (ts *TcpServer) RemoveChannel(conn net.Conn) {
+	ts.removeChannel <- conn
 }
 
-func (c *ConnectionManager) Run() {
+func (ts *TcpServer) Run() {
 	for {
 		select {
-		case conn := <-c.addChannel:
-			c.mu.Lock()
+		case conn := <-ts.addChannel:
+			ts.mu.Lock()
 			fmt.Printf("Added IP Address Channel: %v\n", conn.RemoteAddr().String())
-			c.Connections[conn] = struct{}{}
-			c.mu.Unlock()
-		case conn := <-c.removeChannel:
-			c.mu.Lock()
+			ts.Connections[conn] = struct{}{}
+			ts.mu.Unlock()
+		case conn := <-ts.removeChannel:
+			ts.mu.Lock()
 			fmt.Printf("Removed  IP Address Channel: %v\n", conn.RemoteAddr().String())
-			delete(c.Connections, conn)
-			c.mu.Unlock()
+			delete(ts.Connections, conn)
+			ts.mu.Unlock()
 		}
 
 	}
 }
 
-func (c *ConnectionManager) ProcessConnections() {
+func (ts *TcpServer) ProcessConnections() {
 	for {
-		conn, err := c.TCPListener.Accept()
+		conn, err := ts.TCPListener.Accept()
 		if err != nil {
 			fmt.Print("TCP accept failed.\n")
 			continue
 		}
 
-		if _, ok := c.Connections[conn]; !ok {
-			go c.AddChannel(conn)
+		if _, ok := ts.Connections[conn]; !ok {
+			go ts.AddChannel(conn)
 		}
 
 		go func() {
 			defer conn.Close()
 			for {
 
-				conn, err := c.ProcessMiddleware(conn)
+				conn, err := ts.ProcessMiddleware(conn)
 				if err != nil {
-					go c.denyPacketConn(conn, fmt.Sprintf("Middleware Error: %v", err))
+					go ts.denyPacketConn(conn, fmt.Sprintf("Middleware Error: %v", err))
 					break
 				} else if conn == nil {
-					go c.denyPacketConn(conn, "Middleware failed to return a connection")
+					go ts.denyPacketConn(conn, "Middleware failed to return a connection")
 					break
 				}
 
-				c.distributePacketConn(conn)
+				ts.distributePacketConn(conn)
 			}
 		}()
 
 	}
 }
 
-func (p *ConnectionManager) AddMiddleware(mw func(net.Conn) (net.Conn, error)) *ConnectionManager {
-	p.MiddleWare = append(p.MiddleWare, mw)
-	return p
+func (ts *TcpServer) AddMiddleware(mw func(net.Conn) (net.Conn, error)) *TcpServer {
+	ts.MiddleWare = append(ts.MiddleWare, mw)
+	return ts
 }
 
-func (c *ConnectionManager) ProcessMiddleware(conn net.Conn) (net.Conn, error) {
+func (ts *TcpServer) ProcessMiddleware(conn net.Conn) (net.Conn, error) {
 
-	for _, mwf := range c.MiddleWare {
+	for _, mwf := range ts.MiddleWare {
 		_, err := mwf(conn)
 		if err != nil {
-			//conn.Write([]byte(fmt.Sprintf("%v", err)))
+			conn.Write([]byte(fmt.Sprintf("%v", err)))
 			return nil, err
 		}
 	}
@@ -105,13 +124,13 @@ func (c *ConnectionManager) ProcessMiddleware(conn net.Conn) (net.Conn, error) {
 	return conn, nil
 }
 
-func (c *ConnectionManager) denyPacketConn(conn net.Conn, reasoning string) {
+func (ts *TcpServer) denyPacketConn(conn net.Conn, reasoning string) {
 	packet := []byte(reasoning)
-	go c.RemoveChannel(conn)
+	go ts.RemoveChannel(conn)
 	conn.Write(packet)
 }
 
-func (c *ConnectionManager) distributePacketConn(distConn net.Conn) {
+func (ts *TcpServer) distributePacketConn(distConn net.Conn) {
 	buffer := make([]byte, 1024)
 	if _, err := distConn.Read(buffer); err != nil {
 		return
@@ -119,12 +138,8 @@ func (c *ConnectionManager) distributePacketConn(distConn net.Conn) {
 
 	p := network.Packet{}
 	p.FromByteSlice(buffer)
-	fmt.Printf("%v\n", p.Key)
-	fmt.Printf("%v\n", p.Length)
-	fmt.Printf("%v\n", p.User)
-	fmt.Printf("%v\n", string(p.Data))
 
-	for conn := range c.Connections {
+	for conn := range ts.Connections {
 		if conn.RemoteAddr().String() == distConn.RemoteAddr().String() {
 			continue
 		}

@@ -78,7 +78,12 @@ func (p *Packet) BuildFromByteSlice(packetByteSlice []byte) error {
 
 func (p *Packet) FromByteSlice(slice []byte) error {
 
+	if slice == nil {
+		return fmt.Errorf("byte slice is nil")
+	}
+
 	if len(slice) < 25 {
+		fmt.Printf("%v\n", string(slice))
 		return fmt.Errorf("Byte slice to small")
 	}
 
