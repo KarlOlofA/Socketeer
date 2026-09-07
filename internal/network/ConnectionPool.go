@@ -1,20 +1,22 @@
 package connectionPool
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"net"
 	"sync"
 
-	"socketeer.github.com/internal/types/network"
+	"github.com/KarlOlofA/socketeer/internal/types/network"
 )
 
 type TcpServer struct {
 	TCPListener   net.Listener
-	Connections   map[net.Conn]struct{}
+	Connections   sync.Map
 	mu            sync.Mutex
 	addChannel    chan net.Conn
 	removeChannel chan net.Conn
-	MiddleWare    []func(net.Conn) (net.Conn, error)
+	Middleware    []func(net.Conn) (net.Conn, error)
 }
 
 type TcpServerSettings struct {
@@ -25,6 +27,8 @@ type TcpServerSettings struct {
 	ConnectionPoolSize uint
 }
 
+type Middleware func(net.Conn) (net.Conn, error)
+
 func NewTcpServer(settings TcpServerSettings) *TcpServer {
 
 	listener, err := net.Listen(settings.Method, fmt.Sprintf("%s:%s", settings.Host, settings.Port))
@@ -32,10 +36,9 @@ func NewTcpServer(settings TcpServerSettings) *TcpServer {
 	if err != nil {
 		return nil
 	}
-	defer listener.Close()
 
 	ts := TcpServer{
-		Connections:   make(map[net.Conn]struct{}, settings.ConnectionPoolSize),
+		Connections:   sync.Map{},
 		addChannel:    make(chan net.Conn, settings.ConnectionPoolSize),
 		removeChannel: make(chan net.Conn, settings.ConnectionPoolSize),
 	}
@@ -43,6 +46,10 @@ func NewTcpServer(settings TcpServerSettings) *TcpServer {
 
 	return &ts
 
+}
+
+func (ts *TcpServer) Close() error {
+	return ts.TCPListener.Close()
 }
 
 func (ts *TcpServer) AssignTCPListener(listener net.Listener) {
@@ -60,15 +67,11 @@ func (ts *TcpServer) Run() {
 	for {
 		select {
 		case conn := <-ts.addChannel:
-			ts.mu.Lock()
 			fmt.Printf("Added IP Address Channel: %v\n", conn.RemoteAddr().String())
-			ts.Connections[conn] = struct{}{}
-			ts.mu.Unlock()
+			ts.Connections.Store(conn, struct{}{})
 		case conn := <-ts.removeChannel:
-			ts.mu.Lock()
 			fmt.Printf("Removed  IP Address Channel: %v\n", conn.RemoteAddr().String())
-			delete(ts.Connections, conn)
-			ts.mu.Unlock()
+			ts.Connections.Delete(conn)
 		}
 
 	}
@@ -78,11 +81,11 @@ func (ts *TcpServer) ProcessConnections() {
 	for {
 		conn, err := ts.TCPListener.Accept()
 		if err != nil {
-			fmt.Print("TCP accept failed.\n")
+			fmt.Printf("TCP accept failed: %v\n", err)
 			continue
 		}
 
-		if _, ok := ts.Connections[conn]; !ok {
+		if _, ok := ts.Connections.Load(conn); !ok {
 			go ts.AddChannel(conn)
 		}
 
@@ -106,44 +109,67 @@ func (ts *TcpServer) ProcessConnections() {
 	}
 }
 
-func (ts *TcpServer) AddMiddleware(mw func(net.Conn) (net.Conn, error)) *TcpServer {
-	ts.MiddleWare = append(ts.MiddleWare, mw)
+func (ts *TcpServer) AddMiddleware(mw Middleware) *TcpServer {
+	ts.Middleware = append(ts.Middleware, mw)
 	return ts
 }
 
-func (ts *TcpServer) ProcessMiddleware(conn net.Conn) (net.Conn, error) {
+func MiddlewareChain(middlewares ...Middleware) Middleware {
+	return func(conn net.Conn) (net.Conn, error) {
+		for _, mw := range middlewares {
+			var err error
+			conn, err = mw(conn)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return conn, nil
+	}
+}
 
-	for _, mwf := range ts.MiddleWare {
-		_, err := mwf(conn)
+func (ts *TcpServer) ProcessMiddleware(conn net.Conn) (net.Conn, error) {
+	for _, mw := range ts.Middleware {
+		var err error
+		conn, err = mw(conn)
 		if err != nil {
-			conn.Write([]byte(fmt.Sprintf("%v", err)))
 			return nil, err
 		}
 	}
-
 	return conn, nil
 }
 
 func (ts *TcpServer) denyPacketConn(conn net.Conn, reasoning string) {
+	if conn == nil {
+		fmt.Printf("Connection is nil: %s\n", reasoning)
+		return
+	}
 	packet := []byte(reasoning)
+	if _, err := conn.Write(packet); err != nil {
+		fmt.Printf("%v\n", err)
+	}
+	conn.Close()
 	go ts.RemoveChannel(conn)
-	conn.Write(packet)
 }
 
 func (ts *TcpServer) distributePacketConn(distConn net.Conn) {
-	buffer := make([]byte, 1024)
-	if _, err := distConn.Read(buffer); err != nil {
-		return
-	}
+	var buffer bytes.Buffer
+	io.Copy(&buffer, distConn)
 
 	p := network.Packet{}
-	p.FromByteSlice(buffer)
+	p.FromByteSlice(buffer.Bytes())
 
-	for conn := range ts.Connections {
+	fmt.Printf("%v | %v | %v | %v\n", p.Key, p.User, p.Length, string(p.Data))
+
+	ts.Connections.Range(func(key, value any) bool {
+
+		conn := key.(net.Conn)
+
 		if conn.RemoteAddr().String() == distConn.RemoteAddr().String() {
-			continue
+			return true
 		}
 
-		conn.Write(buffer[:24+p.Length])
-	}
+		conn.Write(buffer.Bytes()[:24+p.Length])
+		return true
+	})
+
 }

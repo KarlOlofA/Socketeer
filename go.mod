@@ -1,4 +1,4 @@
-module socketeer.github.com
+module github.com/KarlOlofA/socketeer
 
 go 1.26.1
 

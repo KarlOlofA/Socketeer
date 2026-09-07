@@ -3,7 +3,7 @@ package network
 import (
 	"net"
 
-	"socketeer.github.com/internal/auth"
+	"github.com/KarlOlofA/socketeer/internal/auth"
 )
 
 type Connection struct {
