@@ -16,7 +16,7 @@ func main() {
 	args := os.Args
 
 	settings := pool.TcpServerSettings{
-		Host:               "192.168.1.41",
+		Host:               "192.168.1.147",
 		Port:               "8080",
 		Method:             "tcp",
 		Key:                "1234",

@@ -1,9 +1,7 @@
 package middleware
 
 import (
-	"bytes"
 	"fmt"
-	"io"
 	"net"
 
 	pool "github.com/KarlOlofA/socketeer/internal/network"
@@ -13,13 +11,13 @@ import (
 func AuthMiddleware(key string) pool.Middleware {
 	return func(conn net.Conn) (net.Conn, error) {
 		p := types.Packet{}
-		var buffer bytes.Buffer
-		_, err := io.Copy(&buffer, conn)
+		var buffer []byte = make([]byte, 1024)
+		_, err := conn.Read(buffer)
 		if err != nil {
 			return nil, err
 		}
 
-		err = p.FromByteSlice(buffer.Bytes())
+		err = p.FromByteSlice(buffer)
 		if err != nil {
 			return nil, err
 		}

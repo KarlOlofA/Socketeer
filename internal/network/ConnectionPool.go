@@ -1,9 +1,7 @@
 package connectionPool
 
 import (
-	"bytes"
 	"fmt"
-	"io"
 	"net"
 	"sync"
 
@@ -81,18 +79,18 @@ func (ts *TcpServer) ProcessConnections() {
 	for {
 		conn, err := ts.TCPListener.Accept()
 		if err != nil {
-			fmt.Printf("TCP accept failed: %v\n", err)
+			fmt.Print("TCP accept failed.\n")
 			continue
 		}
 
-		if _, ok := ts.Connections.Load(conn); !ok {
+		_, exists := ts.Connections.Load(conn)
+		if !exists {
 			go ts.AddChannel(conn)
 		}
 
-		go func() {
+		func() {
 			defer conn.Close()
 			for {
-
 				conn, err := ts.ProcessMiddleware(conn)
 				if err != nil {
 					go ts.denyPacketConn(conn, fmt.Sprintf("Middleware Error: %v", err))
@@ -101,11 +99,9 @@ func (ts *TcpServer) ProcessConnections() {
 					go ts.denyPacketConn(conn, "Middleware failed to return a connection")
 					break
 				}
-
 				ts.distributePacketConn(conn)
 			}
 		}()
-
 	}
 }
 
@@ -143,6 +139,7 @@ func (ts *TcpServer) denyPacketConn(conn net.Conn, reasoning string) {
 		fmt.Printf("Connection is nil: %s\n", reasoning)
 		return
 	}
+	fmt.Printf("Closing connection: %v\n", conn.RemoteAddr())
 	packet := []byte(reasoning)
 	if _, err := conn.Write(packet); err != nil {
 		fmt.Printf("%v\n", err)
@@ -152,11 +149,16 @@ func (ts *TcpServer) denyPacketConn(conn net.Conn, reasoning string) {
 }
 
 func (ts *TcpServer) distributePacketConn(distConn net.Conn) {
-	var buffer bytes.Buffer
-	io.Copy(&buffer, distConn)
+	fmt.Printf("Wa?\n")
+	var buffer []byte = make([]byte, 1024)
+	_, err := distConn.Read(buffer)
+	if err != nil {
+		fmt.Printf("Failed to parse message for distribution: %v\n", err)
+		return
+	}
 
 	p := network.Packet{}
-	p.FromByteSlice(buffer.Bytes())
+	p.FromByteSlice(buffer)
 
 	fmt.Printf("%v | %v | %v | %v\n", p.Key, p.User, p.Length, string(p.Data))
 
@@ -168,7 +170,7 @@ func (ts *TcpServer) distributePacketConn(distConn net.Conn) {
 			return true
 		}
 
-		conn.Write(buffer.Bytes()[:24+p.Length])
+		conn.Write(buffer[:24+p.Length])
 		return true
 	})
 

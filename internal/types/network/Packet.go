@@ -38,6 +38,7 @@ func (p *Packet) FromByteSlice(slice []byte) error {
 
 	if len(slice) < 25 {
 		fmt.Printf("%v\n", string(slice))
+		fmt.Printf("%v\n", len(slice))
 		return fmt.Errorf("Byte slice to small")
 	}
 
