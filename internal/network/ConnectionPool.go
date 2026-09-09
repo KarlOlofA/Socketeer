@@ -1,6 +1,7 @@
 package connectionPool
 
 import (
+	"encoding/binary"
 	"fmt"
 	"net"
 	"sync"
@@ -62,17 +63,19 @@ func (ts *TcpServer) RemoveChannel(conn net.Conn) {
 }
 
 func (ts *TcpServer) Run() {
-	for {
-		select {
-		case conn := <-ts.addChannel:
-			fmt.Printf("Added IP Address Channel: %v\n", conn.RemoteAddr().String())
-			ts.Connections.Store(conn, struct{}{})
-		case conn := <-ts.removeChannel:
-			fmt.Printf("Removed  IP Address Channel: %v\n", conn.RemoteAddr().String())
-			ts.Connections.Delete(conn)
+	go func() {
+		for {
+			select {
+			case conn := <-ts.addChannel:
+				fmt.Printf("Added IP Address Channel: %v\n", conn.RemoteAddr().String())
+				ts.Connections.Store(conn.RemoteAddr().String(), conn)
+			case conn := <-ts.removeChannel:
+				fmt.Printf("Removed  IP Address Channel: %v\n", conn.RemoteAddr().String())
+				ts.Connections.Delete(conn.RemoteAddr().String())
+			}
 		}
-
-	}
+	}()
+	ts.ProcessConnections()
 }
 
 func (ts *TcpServer) ProcessConnections() {
@@ -83,55 +86,15 @@ func (ts *TcpServer) ProcessConnections() {
 			continue
 		}
 
-		_, exists := ts.Connections.Load(conn)
+		_, exists := ts.Connections.Load(conn.RemoteAddr().String())
 		if !exists {
 			go ts.AddChannel(conn)
 		}
 
-		func() {
-			defer conn.Close()
-			for {
-				conn, err := ts.ProcessMiddleware(conn)
-				if err != nil {
-					go ts.denyPacketConn(conn, fmt.Sprintf("Middleware Error: %v", err))
-					break
-				} else if conn == nil {
-					go ts.denyPacketConn(conn, "Middleware failed to return a connection")
-					break
-				}
-				ts.distributePacketConn(conn)
-			}
+		go func() {
+			ts.distributePacketConn(conn)
 		}()
 	}
-}
-
-func (ts *TcpServer) AddMiddleware(mw Middleware) *TcpServer {
-	ts.Middleware = append(ts.Middleware, mw)
-	return ts
-}
-
-func MiddlewareChain(middlewares ...Middleware) Middleware {
-	return func(conn net.Conn) (net.Conn, error) {
-		for _, mw := range middlewares {
-			var err error
-			conn, err = mw(conn)
-			if err != nil {
-				return nil, err
-			}
-		}
-		return conn, nil
-	}
-}
-
-func (ts *TcpServer) ProcessMiddleware(conn net.Conn) (net.Conn, error) {
-	for _, mw := range ts.Middleware {
-		var err error
-		conn, err = mw(conn)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return conn, nil
 }
 
 func (ts *TcpServer) denyPacketConn(conn net.Conn, reasoning string) {
@@ -140,20 +103,21 @@ func (ts *TcpServer) denyPacketConn(conn net.Conn, reasoning string) {
 		return
 	}
 	fmt.Printf("Closing connection: %v\n", conn.RemoteAddr())
-	packet := []byte(reasoning)
-	if _, err := conn.Write(packet); err != nil {
-		fmt.Printf("%v\n", err)
-	}
 	conn.Close()
-	go ts.RemoveChannel(conn)
+	ts.RemoveChannel(conn)
 }
 
 func (ts *TcpServer) distributePacketConn(distConn net.Conn) {
-	fmt.Printf("Wa?\n")
-	var buffer []byte = make([]byte, 1024)
-	_, err := distConn.Read(buffer)
+	var size uint32
+	err := binary.Read(distConn, binary.BigEndian, &size)
 	if err != nil {
-		fmt.Printf("Failed to parse message for distribution: %v\n", err)
+		// Handle error
+	}
+
+	var buffer []byte = make([]byte, size)
+	_, err = distConn.Read(buffer)
+	if err != nil {
+		ts.denyPacketConn(distConn, fmt.Sprintf("Failed to parse message for distribution: %v", err))
 		return
 	}
 
@@ -164,13 +128,14 @@ func (ts *TcpServer) distributePacketConn(distConn net.Conn) {
 
 	ts.Connections.Range(func(key, value any) bool {
 
-		conn := key.(net.Conn)
+		conn := value.(net.Conn)
+		ip := key.(string)
 
-		if conn.RemoteAddr().String() == distConn.RemoteAddr().String() {
+		if ip == distConn.RemoteAddr().String() {
 			return true
 		}
 
-		conn.Write(buffer[:24+p.Length])
+		conn.Write(buffer)
 		return true
 	})
 

@@ -6,7 +6,6 @@ import (
 	"os"
 
 	pool "github.com/KarlOlofA/socketeer/internal/network"
-	authMw "github.com/KarlOlofA/socketeer/internal/network/middleware"
 	"github.com/joho/godotenv"
 )
 
@@ -33,13 +32,7 @@ func main() {
 	}
 	defer server.Close()
 
-	auth := authMw.AuthMiddleware(settings.Key)
-
-	mwChain := pool.MiddlewareChain(auth)
-	server.AddMiddleware(mwChain)
-
 	fmt.Printf("Listening to %s:%s.\n", settings.Host, settings.Port)
-	go server.Run()
+	server.Run()
 
-	server.ProcessConnections()
 }
