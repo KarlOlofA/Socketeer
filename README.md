@@ -59,6 +59,6 @@ You can easily change the general settings such as host, port and tcp method wit
 	}
 ```
 
-## Contribution
+## Contributing
 
 For new features, please open a Discussion prior to creating a pull request. This allows the me and community to think about the change and provide feedback. When the maintainers are ready to accept new features, we will look through the "Ideas" in the project's GitHub Discussions.
